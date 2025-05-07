@@ -1,0 +1,57 @@
+class _MerkleTree {
+public:
+    struct MerkleNode {
+        h256 hash;
+        MerkleNode* left;
+        MerkleNode* right;
+
+        MerkleNode(h256 hash_val) : hash(hash_val), left(nullptr), right(nullptr) {}
+    };
+
+    MerkleNode* root;
+
+    // 默认构造函数
+    _MerkleTree() : root(nullptr) {}
+
+    // 构造函数 - 基于已有数据生成
+    _MerkleTree(const vector<string>& data) {
+        root = generateMerkleTree(data);
+    }
+
+    // 深拷贝构造函数
+    _MerkleTree(const _MerkleTree& other) {
+        root = copyMerkleTree(other.root);
+    }
+
+    // 深拷贝赋值运算符
+    _MerkleTree& operator=(const _MerkleTree& other) {
+        if (this != &other) {
+            clearMerkleTree(root);
+            root = copyMerkleTree(other.root);
+        }
+        return *this;
+    }
+
+    // 析构函数
+    ~_MerkleTree() {
+        clearMerkleTree(root);
+    }
+
+private:
+    // 深拷贝函数：递归复制Merkle树
+    MerkleNode* copyMerkleTree(MerkleNode* node) {
+        if (!node) return nullptr;
+        MerkleNode* newNode = new MerkleNode(node->hash);
+        newNode->left = copyMerkleTree(node->left);
+        newNode->right = copyMerkleTree(node->right);
+        return newNode;
+    }
+
+    // 清理树的内存
+    void clearMerkleTree(MerkleNode* node) {
+        if (!node) return;
+        clearMerkleTree(node->left);
+        clearMerkleTree(node->right);
+        delete node;
+    }
+};
