@@ -52,9 +52,9 @@ class MPTState : public dev::executive::StateFace
 {
 public:
     
-    int t_state_size = 0;
-    int t_extraInfo_size = 0;
-    int t_encoded_size = 0;
+    int64_t t_state_size = 0;
+    int64_t t_extraInfo_size = 0;
+    int64_t t_encoded_size = 0;
     // 记录状态数据的存储信息
     struct StateLocation {
         public:
@@ -93,7 +93,7 @@ public:
       : m_state(_accountStartNonce, _db, _bs)
       {
           std::cout << "init start2" << std::endl;
-          if(!flag)
+        if(!flag)
         {
             // initVC();
             flag = true;
@@ -145,7 +145,7 @@ public:
 
     void makeEC(int block_number, int thread_number);
 
-    std::unordered_map<h256, std::string> makeECFromMPT(int block_number, int node_number);
+    std::unordered_map<h256, std::string> makeECFromMPT(int block_number, std::vector<int> config);
 
     bool addressInUse(Address const& _address) const override;
 

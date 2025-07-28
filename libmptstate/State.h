@@ -380,7 +380,7 @@ using SecureTrieDB = SpecificTrieDB<FatGenericTrieDB<DB>, KeyType>;
             std::unordered_map<u256,u256> m_test_storage;
             std::unordered_map<int,std::unordered_map<std::string, std::string>> s_storage;
             //modified
-            int count  = 0;
+            size_t m_count  = 0;
         };
 
         std::ostream& operator<<(std::ostream& _out, State const& _s);

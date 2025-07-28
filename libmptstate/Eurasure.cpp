@@ -2743,7 +2743,7 @@ void Eurasure::makeECFromKV(int block_number, int _kv_number)
     std::cout << "finish EC from KV.txt " << std::endl;
 }
 
-std::unordered_map<h256, std::string> Eurasure::makeECFromMPT(int block_number, BMT& bmt, int fault_tolerance)
+std::unordered_map<h256, std::string> Eurasure::makeECFromMPT(int block_number, BMT& bmt, int fault_tolerance, int encoding_level)
 {
     std::cout<< "Block Number : " << block_number << std::endl;
 
@@ -2756,6 +2756,7 @@ std::unordered_map<h256, std::string> Eurasure::makeECFromMPT(int block_number, 
     while(level){
         std::vector<std::shared_ptr<Node>> nextLevel;
         for(auto& currentNode: currentLevel){
+            // ancestors_leaves 多半是有重复的（奇数情况） 所以当遍历到重复的祖先 则其已经有校验块[p->不为空]
             if(bmt.ancestors_leaves.count(currentNode->_hash) && currentNode->p.empty()){
                 auto leaves = bmt.ancestors_leaves[currentNode->_hash];
                 auto trans_leaves = std::vector<std::pair<dev::h256, std::string>>();
@@ -2771,7 +2772,7 @@ std::unordered_map<h256, std::string> Eurasure::makeECFromMPT(int block_number, 
                 ec_m = level; // 原为校验块的数量，现为每一层校验块的数量
                 auto encoded_data = saveChunkFromMPT(trans_leaves, bmt, currentNode);
                 totalEncodedData.insert(encoded_data.begin(), encoded_data.end());
-                std::cout<<"These leaves EC Finish: "<< leaves << std::endl;
+                // std::cout<<"These leaves EC Finish: "<< leaves << std::endl;
             }
             else{
                 std::cout<<"Error Hash."<< std::endl;
@@ -2782,7 +2783,7 @@ std::unordered_map<h256, std::string> Eurasure::makeECFromMPT(int block_number, 
         }
         currentLevel = nextLevel;
         if(first_time){
-            level = bmt.l - 1;
+            level = min(encoding_level - 1, bmt.l - 1);
             first_time = false;
         }
         else{
@@ -2804,7 +2805,7 @@ std::unordered_map<h256, std::string> Eurasure::saveChunkFromMPT(std::vector<std
     // 第一个参数是指向ec后的数组的指针，第二个参数是每个数组的长度（其中最大的变量）
     std::pair<uint8_t**, int64_t> chunks = encodeFromMPT(preprocessFromMPT(leaves));
 
-    std::cout<<"chunks lengh:"<< chunks.second << std::endl;
+    // std::cout<<"chunks lengh:"<< chunks.second << std::endl;
 
     // std::cout << "DECODE STR: " << decodeFromMPT(chunks) << std::endl;
 
@@ -2817,11 +2818,12 @@ std::unordered_map<h256, std::string> Eurasure::saveChunkFromMPT(std::vector<std
         // std::cout << "Chunks[" << count << "] = " << value << " Lengh = " << value.size() << std::endl;
         if (count >= ec_k){
             // 将校验块的 hash 插入至对应的祖先节点处
-            cout<<"将校验块的 hash 插入至对应的祖先节点" << node->_hash << "处 " << value.size() << endl;
+            // cout<<"将校验块的 hash 插入至对应的祖先节点" << node->_hash << "处 " << value.size() << endl;
             node->p.push_back(dev::sha3(value));
             encoded_data[dev::sha3(value)] = value;
         }
     }
+    cout << "Parity chunks: " << ec_m << endl;
 
     // 计算耗时，并输出日志
     auto t2 = std::chrono::steady_clock::now();

@@ -257,11 +257,17 @@ void MPTState::makeEC(int block_number, int thread_number)
 * 
 * 
 * @param block_number 区块编号
-* @param node_number 运行该函数的节点编号(从0开始)
+* @param node_number 节点个数
 * @return totalEncodedData 本轮中编码的结果（以<h256, string>存储）
 * @return partition_result 本轮状态划分的结果 n行为第n个节点的节点集合，每一列为分配的状态地址
 */
-std::unordered_map<h256, std::string> MPTState::makeECFromMPT(int block_number, int node_number){
+std::unordered_map<h256, std::string> MPTState::makeECFromMPT(int block_number, std::vector<int> config){
+    
+    // 容错设置
+    int node_number = config[0];
+    int fault_tolerance = config[1];
+    int encoding_level = config[2];
+    
     /* 2024/10/23 状态编码*/
     auto mut_map = getState().db().get();
     auto mut_set = getState().db().keys();
@@ -277,6 +283,7 @@ std::unordered_map<h256, std::string> MPTState::makeECFromMPT(int block_number, 
     auto t1 = std::chrono::steady_clock::now();
 
     std::cout << " The Map Get From OverlayDB is : \n";
+    versionManager.initDB(getState().db());
     versionManager.processBatch(mut_map);
     versionManager.setVersion(block_number);
     // versionManager.printManager();
@@ -286,12 +293,28 @@ std::unordered_map<h256, std::string> MPTState::makeECFromMPT(int block_number, 
     auto t2 = std::chrono::steady_clock::now();
 
     sp.processBatch(mut_map);
-    // 节点个数
-    sp.init(12);
+    // 节点个数 nodes number
+    sp.init(node_number);
     auto _r = getState().rootHash();
     cout << " (0v0)~~MPTRoot : " << _r << endl;
-    sp.partitionMPT(_r); // 我们的方法 
-    // sp.partitionMPTWithBaseline(_r); // Baseline 按照mod随机划分
+
+    u_int expression = 1; // which partition mode we choose
+    switch (expression){
+        case 1:
+            sp.partitionMPT(_r); // 我们的方法 
+            break;
+        case 2:
+            sp.partitionMPTWithBaseline(_r); // Baseline 按照mod随机划分
+            break;
+        case 3:
+            sp.partitionMPTWithDHT(_r); // distributed by DHT
+            break;
+        case 4:
+            sp.partitionMPTWithLocal(_r); // local read
+            break;
+        default:
+            break;
+    }
     versionManager.setStatePartition(sp);
 
     auto t3 = std::chrono::steady_clock::now();
@@ -324,11 +347,9 @@ std::unordered_map<h256, std::string> MPTState::makeECFromMPT(int block_number, 
     // auto bmt = BMT(mut_map); // 根据 状态数据 生成树
     auto bmt = BMT(chunksRlt); // 根据 状态数据集成的chunk 生成树
     
-    // 容错设置
-    int fault_tolerance = 10;
 
     // 2. 编码阶段
-    auto totalEncodedData = state_erasure->makeECFromMPT(1, bmt, fault_tolerance);
+    auto totalEncodedData = state_erasure->makeECFromMPT(block_number, bmt, fault_tolerance, encoding_level);
     BMT_map.emplace(block_number, bmt);
     
     cb.StorageForChunks(chunksRlt, totalEncodedData, t_state_size, t_extraInfo_size, t_encoded_size); // 计算存储开销

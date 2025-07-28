@@ -54,6 +54,7 @@
 #include "rocksdb/db.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
+#include "SimpleIni.h"
 
 using namespace std;
 using namespace dev;
@@ -968,11 +969,13 @@ public:
         std::cout << tag << ":" << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - beginTime).count() / 1000.0 << " ms" << std::endl;
     }
 
-    inline void PrintTPS(int count) {
+    inline string PrintTPS(int count) {
         double sec_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - beginTime).count() / 1000000.0;
         double tps = count / sec_time;
-        std::cout << tag << ":" << tps << "/s "
-                  << sec_time << " s" << std::endl;
+        auto str = tag + ":" + toString(tps) + "/s" + toString(sec_time) +" s";
+        // std::cout << tag << ":" << tps << "/s "
+        //           << sec_time << " s" << std::endl;
+        return str;
     }
 
 private:
@@ -999,7 +1002,8 @@ void test_BMT(){
     }
     auto bmt = BMT(data_list);
     int fault_tolerance = 2;
-    state_erasure->makeECFromMPT(1, bmt, fault_tolerance);
+    int encoding_level = 2;
+    state_erasure->makeECFromMPT(1, bmt, fault_tolerance, encoding_level);
     // std::cout << "查找的状态hash为" << b.search(1) << std::endl;
     // std::cout << "查找的状态叶子节点的祖先节点" << std::endl;
     // b.findAncestorsAndLeaves(b.search(1));
@@ -1017,7 +1021,8 @@ void test_encodingStates(dev::mptstate::MPTState& mptState){
     auto bmt = BMT(mut_map);
     // mptState.state_erasure = new ec::Eurasure();
     int fault_tolerance = 2;
-    mptState.state_erasure->makeECFromMPT(1, bmt, fault_tolerance);
+    int encoding_level = 2;
+    mptState.state_erasure->makeECFromMPT(1, bmt, fault_tolerance, encoding_level);
     /* 2024/10/23 状态编码 end */
 }
 
@@ -1087,12 +1092,47 @@ void test_EC(){
     }
 }
 
+int zipf_rand(int N, double skew)
+{
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_real_distribution<> dis(0.0, 1.0);
+
+    double b = pow(2.0, skew - 1.0);
+    double r = dis(gen);
+    int rank = (int)(N * pow(r, 1.0 / (1.0 - skew)));
+    if (rank >= N) rank = N - 1;
+    return rank;
+}
+
 int main(int argc, char* argv[])
 {
     // test_EC();
     // return 0;
     /* 2024/10/11 test dxf's MPT code */ 
     
+
+    // input config 
+    SimpleIni ini;
+    ini.load("config.ini");
+
+    std::string host = ini.get("server", "host", "localhost");
+    int port = ini.getInt("server", "port", 80);
+
+    int nodes_number = ini.getInt("general", "nodes_number", 4);
+    int fault_tolerance = ini.getInt("general", "fault_tolerance", 2);
+    int encoding_level = ini.getInt("general", "encoding_level", 2);
+
+    int _block_num = ini.getInt("general", "block_num", 1);
+    int _account_num = ini.getInt("general", "tx_num", 1000);
+    double skew = ini.getInt("general", "skew", 0.0);
+
+    // std::cout << "Host" << host << "\n";
+    // std::cout << "Port" << port << "\n";
+    // std::cout  << "Debug" << (debug ? "on" : "off") << "\n";
+
+    // return 0;
+
     int account_size = 1000000;
     dev::mptstate::MPTState mptState(u256(0), dev::mptstate::MPTState::openDB("./", sha3("0x1234")), dev::mptstate::BaseState::Empty);
     mptState.state_erasure = new ec::Eurasure();
@@ -1103,40 +1143,94 @@ int main(int argc, char* argv[])
         double build_time=0;
         double write_time=0;
 
-        auto _block_num = 1;
-        auto _account_num = 10000;
+        // auto _block_num = 2;
+        // auto _account_num = 10;
         
         int balance = 1;
 
         vector<u160> processed_data;
         unordered_map<int, vector<h256>> data_map;
+        // double skew = 0.0; // address skew
+        writeToLog("Skew"+toString(skew), "output_block_number_log.txt");
+
+        // transaction inject
+        vector<vector<u160>> block_account_list;
+        block_account_list.push_back(vector<u160>());
+
+        vector<u160> last_account_list;
+
+
+        for (int i=1; i <= _block_num; ++i){
+            vector<u160> account_list;
+            if(!last_account_list.empty()){
+                account_list = last_account_list;
+            }
+            else{
+                for(int j=0; j<_account_num; j++){
+                    u160 tmp;
+                    if(skew){
+                        tmp = zipf_rand(account_size, skew);
+                        // cout<<" "<<tmp<<endl;
+                    }
+                    else{
+                        tmp = u160(rand() % account_size);
+                    }
+                    account_list.push_back(tmp);
+                    processed_data.push_back(tmp);
+                }
+            }
+            block_account_list.push_back(account_list);
+            // last_account_list = account_list;
+        }
+        
+        std::vector<h256> execute_data_set;
+
         for (int i = 1; i <= _block_num; i++) {
-            std::cout<<i<<std::endl;
+            // std::cout << i << std::endl;
             std::vector<h256> data_set;
             auto t1 = std::chrono::steady_clock::now();
-            for (int j = 0; j < _account_num; j++) {
-                auto tmp = u160(rand() % account_size);
-                processed_data.push_back(tmp); // 等候查询
-                auto tmp1 = Address(tmp); // 对应的key path
-                auto tmp2 = bytesConstRef((byte const*)&tmp, sizeof(tmp));
-                // std::cout<<"Acount ID:"<< tmp << " sha3:" 
-                //     << sha3(tmp1) << "#" << sizeof(tmp2) << std::endl;
-                
+
+            const auto& account_list = block_account_list[i];
+            for(const auto& tmp : account_list){
+                // test TPS of PTrie
+                // cout << "tmp: " << sha3(Address(tmp)) << endl;
+                // if(i>1)
+                //     mptState.versionManager.at(sha3(Address(tmp)), mptState.rootHash());
+                // auto _i = mptState.rootHash();
+                // cout<< _i;
                 mptState.addBalance(tmp, u256(balance++));
+                
             }
+
             auto t2 = std::chrono::steady_clock::now();
+            // test transcaction execution
+            bool execute = false;
+            if(execute){
+                // 1. 提交至内存
+                mptState.commit();
+                // 4. 提交至DB（与编码块
+                // mptState.getState().db().commit();
+                t2 = std::chrono::steady_clock::now();
+                auto build_time = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0;
+                cout << build_time << endl;
+                // auto tps_log = timer.PrintTPS(_account_num);
+                // writeToLog(tps_log, "tps_log.txt");
+                continue;
+            }
             
             // 1. 提交至内存
             mptState.commit();
 
             // 2. 编码   3. 划分状态
-            mptState.getState().get_m_state().leftOvers(data_set); data_map[i] = data_set; // 窃取一些h256
-            auto tmp = mptState.makeECFromMPT(i, 1);
+            mptState.getState().get_m_state().leftOvers(data_set); 
+            data_map[i] = data_set; // 窃取一些h256
+            vector<int> _config = {nodes_number, fault_tolerance, encoding_level};
+            auto tmp = mptState.makeECFromMPT(i, _config);
 
             // 4. 提交至DB（与编码块
             mptState.getState().db().commit(tmp);
 
-            // mptState.getState().get_m_state().debugStructure(std::cout);   
+            // mptState.getState().get_m_state().debugStructure(std::cout);  
 
             // test search balance 
             // std::cout<< "Begin test search balance" << std::endl;
@@ -1146,14 +1240,28 @@ int main(int argc, char* argv[])
             auto t3 = std::chrono::steady_clock::now();
             build_time+=std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0;
             write_time+=std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / 1000.0;
-            if (i % 500 == 0) {
-                timer.PrintTPS(i * 2000);
-                std::cout<<"BUILD:"<<build_time<<" WRITE:"<<write_time<<std::endl;
+            if (i % 10 == 0) {
+                size_t ttsize = 0;
+                for(const auto& k : data_set) {
+                    std::string rlpDate = mptState.getState().get_m_state().db()->lookup(k);
+                    ttsize += rlpDate.size();
+                }
+                
+                // timer.PrintTPS(_account_num);
+                // std::cout<<"BUILD:"<<build_time<<" WRITE:"<<write_time<<std::endl;
+                auto output = "height:" + toString(i)  
+                    + ",State: " + printMemorySize(mptState.t_state_size) 
+                    + ",ExtraInfo: " + printMemorySize(mptState.t_extraInfo_size) 
+                    + ",Encoded: " + printMemorySize(mptState.t_encoded_size)
+                    + ",SOTA State: " + printMemorySize(ttsize);
+                writeToLog(output, "output_block_number_log.txt");
             }
             std::cout<<"ROOT HASH:"<< mptState.rootHash(true)<<std::endl;
         }
         // mptState.versionManager.printDataSet();
-        
+        // return 0;
+
+
         auto output = "Total State Size: " + printMemorySize(mptState.t_state_size) 
             + ", Total ExtraInfo Size: " + printMemorySize(mptState.t_extraInfo_size) 
             + ", Total Encoded Size: " + printMemorySize(mptState.t_encoded_size);
@@ -1166,7 +1274,7 @@ int main(int argc, char* argv[])
         // return 0;
         
         // 原MPT的查找语句
-        if(false){
+        if(true){
             auto t4 = std::chrono::steady_clock::now();
             int _cnt = 0;
             auto max_time = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t4).count() / 1000.0;;
@@ -1182,7 +1290,8 @@ int main(int argc, char* argv[])
                 auto single_read_time = std::chrono::duration_cast<std::chrono::microseconds>(t4_2 - t4_1).count() / 1000.0;
                 max_time = max(max_time, single_read_time);
                 min_time = min(min_time, single_read_time);
-
+                if(_cnt % 1000 == 0) 
+                    cout<< "Reading......" << _cnt << endl;
             }
 
             auto t5 = std::chrono::steady_clock::now();

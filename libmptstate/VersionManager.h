@@ -91,7 +91,7 @@ public:
     StatePartition() = default;
     
     void init(uint nodeNumber){
-        m_groups = nodeNumber;
+        m_groups = nodeNumber; // The number of nodes 
         totalNodes = tree.size();
         targetSize = targetSize / m_groups;
         // targetMod = totalNodes % m_groups;
@@ -336,6 +336,76 @@ public:
         //     cout << endl;
         // }
     }
+
+    void partitionMPTWithDHT(h256 rootHash) {
+        cout<< "Start partitionMPTWithDHT" << endl;
+        queue<h256> bfsQueue;
+        bfsQueue.push(rootHash);
+        while (!bfsQueue.empty()) {
+            int levelSize = bfsQueue.size(); // 当前层的节点数
+            for (int i = 0; i < levelSize; ++i) {
+                h256 nodeHash = bfsQueue.front();
+                bfsQueue.pop();
+                // cout << "Processing hash -> " << nodeHash << endl;
+
+                // caculate the assign node 
+                size_t sum = 0;
+                for(uint8_t byte : nodeHash) sum = (sum*131+byte) % 1000000007;
+
+                // 分配当前节点到当前组
+                // currentPart = rand() % m_groups;
+                currentPart = sum % m_groups;
+                parts[currentPart].insert(nodeHash);
+                Mapparts[nodeHash] = currentPart;
+                partSize[currentPart] += nodeSize[nodeHash];
+                allocatedNodes += nodeSize[nodeHash];
+
+                // 将子节点加入下一层
+                for (h256 childHash : tree[nodeHash]) {
+                    // cout << "---Push children hash -> " << childHash << endl;
+                    // 如果遍历到非本次更新的节点，则跳过
+                    if(tree.find(childHash) != tree.end()){
+                        bfsQueue.push(childHash);
+                    }   
+                }
+            }
+        }
+    }
+    
+    void partitionMPTWithLocal(h256 rootHash) {
+        cout<< "Start partitionMPTWithDHT" << endl;
+        queue<h256> bfsQueue;
+        bfsQueue.push(rootHash);
+        while (!bfsQueue.empty()) {
+            int levelSize = bfsQueue.size(); // 当前层的节点数
+            for (int i = 0; i < levelSize; ++i) {
+                h256 nodeHash = bfsQueue.front();
+                bfsQueue.pop();
+                // cout << "Processing hash -> " << nodeHash << endl;
+
+                // caculate the assign node 
+                size_t sum = 0;
+                // for(uint8_t byte : nodeHash) sum = (sum*131+byte) % 1000000007;
+
+                // 分配当前节点到当前组
+                // currentPart = rand() % m_groups;
+                currentPart = sum % m_groups;
+                parts[currentPart].insert(nodeHash);
+                Mapparts[nodeHash] = currentPart;
+                partSize[currentPart] += nodeSize[nodeHash];
+                allocatedNodes += nodeSize[nodeHash];
+
+                // 将子节点加入下一层
+                for (h256 childHash : tree[nodeHash]) {
+                    // cout << "---Push children hash -> " << childHash << endl;
+                    // 如果遍历到非本次更新的节点，则跳过
+                    if(tree.find(childHash) != tree.end()){
+                        bfsQueue.push(childHash);
+                    }   
+                }
+            }
+        }
+    }
 };
 
 class VersionManager {
@@ -468,13 +538,40 @@ class VersionManager {
             string node(h256 hash){
                 auto it = dataSet.find(hash);
                 string str;
+                // Is history read?
+                // if(least_state != nullptr){
+                //     auto it = std::find(least_state->begin(), least_state->end(), hash);
+                //     if(it == least_state->end()){
+                //         // can not find in least mpt
+                //         // cout << "Can not find: " << hash << endl;
+                //         execution_remote_read++;
+                //     }
+                // }
+                // find in cache
                 if(it != dataSet.end()){
                     str = (it -> second).first;
                     auto meta = (it -> second).second;
                     auto num = meta.getNodeNum();
+                    // remote read times
                     if(current_read != num){
                         if(current_read != -1){
-                            std::this_thread::sleep_for(std::chrono::microseconds(10000 * 2));
+                            // std::this_thread::sleep_for(std::chrono::microseconds(10000 * 2));
+                            // cout << "Cross node reading ...... sleep 0.06ms "; microseconds(60 * 2)
+                        }
+                        current_read = num;
+                        read_count++;
+                    }
+                }
+                else{ // find in disk
+                    // cout <<"Entry DB Lookup" << endl;
+                    str = m_db->lookup(hash);
+                    // cout << str << endl;
+                    auto meta = (it -> second).second;
+                    auto num = meta.getNodeNum();
+                    // remote read times
+                    if(current_read != num){
+                        if(current_read != -1){
+                            // std::this_thread::sleep_for(std::chrono::microseconds(10000 * 2));
                             // cout << "Cross node reading ...... sleep 0.06ms "; microseconds(60 * 2)
                         }
                         current_read = num;
@@ -488,6 +585,8 @@ class VersionManager {
                 // auto n = NibbleSlice(b);
                 auto rlt = atAux(RLP(node(root)), bytesConstRef((byte const*)&_k, sizeof(_k)));
                 // cout << "at rlt = " << RLP(rlt) << std::endl;
+                // 执行时远程读归零
+                execution_remote_read = 0;
             }
 
             string atAux(RLP _here, NibbleSlice _key){
@@ -568,11 +667,32 @@ class VersionManager {
             StatePartition sp;
             unordered_map<h256, pair<std::string, NodeMetadata>> dataSet; // hash 值其对应的 value 和 metadata
             unordered_map<h256, bool> dataSet_init;
+            size_t execution_remote_read = 0;
+
+            vector<h256>* least_state = nullptr;
+            void setLeastState(vector<h256>* lt){
+                least_state = lt;
+            }
+            // void initDataMap(vector<h256>& data_map){
+            //     m_data_map = data_map;
+            // }
+            // void checkDataMap(h256& target){
+            //     auto it = m_data_map.find(target);
+            //     if(it == m_data_map.end()){
+            //         // can not found, no exist in this MPT
+            //         cout << "can not found, no exist in this MPT" << endl;
+            //     }
+            // }
 
             unordered_map<h256, string> dataWithchildsNodeMetadata;
 
             int current_read = -1; // 记录现在正在遍历MPT节点属于的节点
             int read_count = 0; // 记录遍历过程访问了多少个节点
+            size_t not_in_cache = 0; // 记录访问了多少个 不再当前状态树 的节点
+            OverlayDB *m_db = nullptr; // state DB for versionmanager
+            void initDB(OverlayDB& db){
+                m_db = &db;
+            }
 
 };
 
@@ -1109,11 +1229,11 @@ public:
         cout << "= = = = = = = = = =" << endl;
     }
 
-    pair<int, int> StorageForChunks(vector<string>& parts, unordered_map<h256, std::string>& encoded_set, int& s, int& ex, int& e){
+    pair<int, int> StorageForChunks(vector<string>& parts, unordered_map<h256, std::string>& encoded_set, int64_t& s, int64_t& ex, int64_t& e){
         // 打印每一个Chunk的大小
-        int state_size = 0;
-        int encoded_size = 0;
-        int extraInfo_size = TotalMetaSize;
+        int64_t state_size = 0;
+        int64_t encoded_size = 0;
+        int64_t extraInfo_size = TotalMetaSize;
         for(int i=0; i < parts.size(); i++){
             // cout << "Chunk[" << i << "] Size is ";
             state_size += parts[i].size();

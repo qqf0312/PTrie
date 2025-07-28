@@ -167,7 +167,7 @@ class Eurasure : public std::enable_shared_from_this<Eurasure> {
     * @author qqf
     * @date 2024/10/30
     */
-    std::unordered_map<dev::h256, std::string> makeECFromMPT(int block_number, dev::BMT& bmt, int fault_tolerance);
+    std::unordered_map<dev::h256, std::string> makeECFromMPT(int block_number, dev::BMT& bmt, int fault_tolerance, int encoding_level);
     std::unordered_map<dev::h256, std::string> saveChunkFromMPT(std::vector<std::pair<dev::h256, std::string>>& leaves, dev::BMT& bmt, std::shared_ptr<dev::Node>& node);
     std::pair<uint8_t *, int64_t> preprocessFromMPT(std::vector<std::pair<dev::h256, std::string>>& leaves);
     size_t maxLenFromMPT(const std::vector<std::pair<dev::h256, std::string>>& leaves, std::vector<std::string>& processed_data);
